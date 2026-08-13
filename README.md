@@ -120,6 +120,4 @@ http://localhost:8501
 
 ## Author
 
-**Your Name**
-
-GitHub: `Tofayel Hossain`
+**Tofayel Hossain**
