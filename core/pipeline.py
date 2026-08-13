@@ -33,27 +33,39 @@ def _safe_score(value, default: float = 0.0) -> float:
 
 def extract_job_title(jd_text: str) -> str:
     """
-    Try to detect a real job title without accidentally using
-    Education / Requirement text as the title.
+    Extract the most likely job title from a Job Description.
+
+    Priority:
+    1. Explicit labels: Job Title, Position, Role, Vacancy
+    2. Short title-like lines containing profession terms
+    3. Avoid education, requirement, company, location and section headings
     """
 
     lines = [
-        line.strip()
+        re.sub(r"\s+", " ", line).strip(" :-•\t")
         for line in jd_text.splitlines()
         if line.strip()
     ]
 
-    # ---------------------------------------------------------
-    # 1. Prefer explicit Job Title / Position / Role labels
-    # ---------------------------------------------------------
+    if not lines:
+        return ""
+
+    # =========================================================
+    # 1. EXPLICIT JOB TITLE LABELS
+    # =========================================================
 
     explicit_patterns = [
-        r"^job\s*title\s*:\s*(.+)$",
-        r"^position\s*:\s*(.+)$",
-        r"^role\s*:\s*(.+)$",
+        r"^job\s*title\s*[:\-]\s*(.+)$",
+        r"^position\s*[:\-]\s*(.+)$",
+        r"^position\s*title\s*[:\-]\s*(.+)$",
+        r"^role\s*[:\-]\s*(.+)$",
+        r"^job\s*role\s*[:\-]\s*(.+)$",
+        r"^vacancy\s*for\s*[:\-]?\s*(.+)$",
+        r"^hiring\s*for\s*[:\-]?\s*(.+)$",
+        r"^we\s+are\s+hiring\s*[:\-]?\s*(.+)$",
     ]
 
-    for line in lines[:30]:
+    for line in lines[:40]:
         for pattern in explicit_patterns:
             match = re.match(
                 pattern,
@@ -64,78 +76,284 @@ def extract_job_title(jd_text: str) -> str:
             if match:
                 title = match.group(1).strip()
 
-                if title:
+                if _valid_job_title(title):
                     return title[:120]
 
-    # ---------------------------------------------------------
-    # 2. Search likely role-title lines
-    # ---------------------------------------------------------
+    # =========================================================
+    # 2. COMMON ROLE WORDS
+    # =========================================================
 
     role_terms = (
+        # Engineering / Technology
         "engineer",
         "developer",
+        "programmer",
+        "architect",
+        "administrator",
+        "technician",
+        "operator",
+
+        # Data / Research
         "analyst",
         "scientist",
+        "researcher",
+        "statistician",
+
+        # Management / Leadership
         "manager",
-        "designer",
-        "architect",
-        "specialist",
-        "administrator",
-        "intern",
-        "consultant",
+        "director",
+        "head",
+        "supervisor",
+        "coordinator",
+        "lead",
+
+        # Business / Corporate
         "executive",
         "officer",
-        "technician",
-        "coordinator",
-        "supervisor",
+        "specialist",
+        "consultant",
+        "advisor",
+        "associate",
+        "assistant",
+        "representative",
+
+        # Finance / Accounting
         "accountant",
         "auditor",
+        "banker",
+        "economist",
+        "treasurer",
+
+        # HR
+        "recruiter",
+        "recruitment",
+        "human resources",
+
+        # Sales / Marketing
         "marketer",
         "sales",
-        "recruiter",
+        "marketing",
+        "merchandiser",
+        "brand manager",
+
+        # Design / Creative
+        "designer",
+        "writer",
+        "copywriter",
+        "editor",
+        "photographer",
+        "animator",
+
+        # Education
+        "teacher",
+        "lecturer",
+        "professor",
+        "instructor",
+        "trainer",
+
+        # Medical / Healthcare
+        "doctor",
+        "physician",
+        "nurse",
+        "pharmacist",
+        "therapist",
+        "surgeon",
+        "dentist",
+
+        # Legal
+        "lawyer",
+        "attorney",
+        "advocate",
+        "paralegal",
+
+        # Entry level
+        "intern",
+        "trainee",
     )
 
-    # Lines containing these are usually requirements,
-    # not actual job titles.
+    # =========================================================
+    # 3. LINES THAT SHOULD NOT BECOME JOB TITLES
+    # =========================================================
+
     reject_terms = (
         "bachelor",
-        "bsc",
         "b.sc",
+        "bsc",
         "master",
+        "m.sc",
         "msc",
         "degree",
         "diploma",
         "education",
-        "requirement",
-        "requirements",
-        "preferred",
-        "experience",
-        "responsibilities",
-        "skills",
         "qualification",
+        "academic",
         "university",
+        "college",
+
+        "experience required",
+        "years of experience",
+        "minimum experience",
+
+        "job description",
+        "job responsibilities",
+        "responsibilities",
+        "requirements",
+        "additional requirements",
+        "preferred qualifications",
+        "skills",
+        "skills required",
+        "technical skills",
+
+        "salary",
+        "compensation",
+        "benefits",
+        "location",
+        "workplace",
+        "employment status",
+        "vacancy",
+        "application deadline",
+
+        "about us",
+        "about company",
+        "company overview",
+        "company name",
     )
 
-    for line in lines[:25]:
-        low = line.lower()
+    # =========================================================
+    # 4. SCORE TITLE-LIKE LINES
+    # =========================================================
 
-        if len(line) > 100:
+    candidates = []
+
+    for index, line in enumerate(lines[:40]):
+        low = line.lower().strip()
+
+        if not _valid_job_title(line):
             continue
 
         if any(term in low for term in reject_terms):
             continue
 
-        if any(
-            re.search(
-                rf"\b{re.escape(term)}\b",
-                low,
-            )
+        score = 0
+
+        # Short lines are more likely to be titles.
+        word_count = len(line.split())
+
+        if 2 <= word_count <= 6:
+            score += 5
+        elif word_count <= 10:
+            score += 2
+        else:
+            score -= 4
+
+        # Earlier lines are more likely to contain title.
+        if index <= 3:
+            score += 5
+        elif index <= 8:
+            score += 3
+        elif index <= 15:
+            score += 1
+
+        # Strong role-word match.
+        matched_roles = [
+            term
             for term in role_terms
+            if re.search(
+                rf"(?<!\w){re.escape(term)}(?!\w)",
+                low,
+                flags=re.I,
+            )
+        ]
+
+        if not matched_roles:
+            continue
+
+        score += 8
+
+        # Seniority words make title more likely.
+        if re.search(
+            r"\b("
+            r"senior|sr\.?|junior|jr\.?|lead|principal|"
+            r"associate|assistant|deputy|chief|head|"
+            r"entry[- ]level"
+            r")\b",
+            low,
+            flags=re.I,
         ):
-            return line[:120]
+            score += 3
 
-    return "Target Role"
+        # Sentences are less likely to be titles.
+        if line.endswith((".", "!", "?")):
+            score -= 4
 
+        # Too many commas usually indicates requirement text.
+        if line.count(",") >= 2:
+            score -= 3
+
+        candidates.append(
+            (
+                score,
+                index,
+                line,
+            )
+        )
+
+    # =========================================================
+    # 5. RETURN BEST CANDIDATE
+    # =========================================================
+
+    if candidates:
+        candidates.sort(
+            key=lambda item: (
+                -item[0],
+                item[1],
+            )
+        )
+
+        best_score, _, best_title = candidates[0]
+
+        # Prevent weak/random guesses.
+        if best_score >= 8:
+            return best_title[:120]
+
+    return "Job Role Not Detected"
+
+
+def _valid_job_title(text: str) -> bool:
+    """
+    Reject obvious non-title strings.
+    """
+
+    text = text.strip()
+
+    if not text:
+        return False
+
+    if len(text) > 120:
+        return False
+
+    words = text.split()
+
+    if len(words) > 12:
+        return False
+
+    low = text.lower()
+
+    # URLs / email-like content
+    if "http://" in low or "https://" in low:
+        return False
+
+    if "@" in text:
+        return False
+
+    # Mostly numerical lines
+    if re.fullmatch(
+        r"[\d\s./\-–]+",
+        text,
+    ):
+        return False
+
+    return True
 
 def calculate_field_match(
     skills: dict,
@@ -344,7 +562,7 @@ def analyze(
     # =========================================================
     # 1. RESUME + JD TEXT
     # =========================================================
-    update(15, "Extracting resume...")
+    update(5, "Extracting resume...")
     resume_raw = extract_resume_text(
         file_bytes,
         filename,
@@ -361,7 +579,7 @@ def analyze(
     # =========================================================
     # 2. STRUCTURED JD REQUIREMENTS
     # =========================================================
-    update(35, "Processing information...")
+    update(25, "Processing information...")
     requirements = build_requirement_comparison(
         resume_text,
         jd_text,
@@ -370,7 +588,7 @@ def analyze(
     # =========================================================
     # 3. SKILL MATCH
     # =========================================================
-    update(55, "Matching CV with Job Description...")
+    update(45, "Matching CV with Job Description...")
     # Only use requirement-bearing JD sections.
     # Benefits / location / sensitive criteria should not
     # reduce the actual required-skill score.
@@ -444,7 +662,7 @@ def analyze(
     # =========================================================
     # 9. SAFE SKILL SCORE
     # =========================================================
-
+    update(65, "Calculating compatibility score...")
     skill_score = skills.get(
         "score"
     )
@@ -487,7 +705,6 @@ def analyze(
     # =========================================================
     # 11. SAFE COMPONENT SCORES
     # =========================================================
-    update(75, "Calculating compatibility score...")
     semantic_score = _safe_score(
         semantic.get(
             "score",
@@ -553,7 +770,7 @@ def analyze(
     # =========================================================
     # 13. RESULT OBJECT
     # =========================================================
-    update(90, "Preparing output...")
+    update(85, "Preparing output...")
     result = {
         "job_title": extract_job_title(
             jd_text
