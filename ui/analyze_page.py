@@ -58,10 +58,6 @@ def _render_results(result: dict):
     with right:
         st.subheader(result["job_title"])
         st.write(f"Resume: **{result['resume_filename']}**")
-        st.caption(
-            "Core score: skills 25% + semantic 20% + experience 20% + "
-            "education 15% + keywords 10% + resume quality 10%."
-        )
         st.progress(int(round(score)))
 
     st.subheader("Core requirement breakdown")
@@ -73,33 +69,57 @@ def _render_results(result: dict):
             "Skills",
             "Education",
             "Experience",
-            "Location & Advantages",
+            "Location",
+            "Additional Advantages",
             "Keywords",
             "Improvements",
-            "Interview",
+            "Interview Preparation",
         ]
     )
 
     with tabs[0]:
-        explanation = result["explanation"]
-        c1, c2 = st.columns(2, gap="large")
-        with c1:
-            st.markdown("#### What matched well")
-            for item in explanation["positive"]:
-                st.success(item)
-        with c2:
-            st.markdown("#### Core gaps")
-            for item in explanation["deductions"]:
-                st.warning(item)
+        st.markdown("#### What matched well")
 
-        for note in explanation.get("notes", []):
-            st.info(note)
-        st.caption(explanation["note"])
+        st.success(f"{len(result['skills']['matched'])} job-related skills matched")
 
-        if result["semantic"].get("fallback"):
-            st.warning(
-                "Sentence Transformer was unavailable, so this run used TF-IDF cosine similarity as a fallback."
+        education = result.get("education", {})
+        if education.get("score", 0) >= 80:
+            st.success("Education requirement fulfilled")
+
+        if result["scores"]["resume_quality"] >= 75:
+            st.success("Resume structure is strong")
+
+        advantages = result.get("advantages", {})
+        matched_advantages = advantages.get("matched", [])
+        if matched_advantages:
+            st.success(
+                f"{len(matched_advantages)} additional advantage(s) matched"
             )
+
+        location = result.get("location", {})
+        if location.get("status") in ["Nearby", "Same area", "Same city"]:
+            st.success(f"Location is {location.get('status').lower()}")
+
+        st.markdown("#### Core gaps")
+
+        if result["skills"]["missing"]:
+            st.warning("Some required skills are missing")
+
+        experience = result.get("experience", {})
+        if experience.get("missing_business_areas"):
+            st.warning(
+                "Required business-area experience was not found"
+            )
+
+        if result["scores"]["keywords"] < 60:
+            st.warning("Keyword coverage is moderate")
+
+        if result["scores"]["semantic"] < 60:
+            st.warning("CV and JD semantic match is moderate")
+
+        st.caption(
+            "This is an estimated compatibility score based on transparent rules and NLP."
+        )
 
     with tabs[1]:
         st.markdown("#### Requirement skills vs CV skills")
@@ -194,7 +214,7 @@ def _render_results(result: dict):
                     "Experience score combines years (75%) and explicit business-area match (25%) when such a requirement exists."
                 )
 
-        section_status = "Found" if exp.get("experience_section_found") else "Not found — fallback scan used"
+        section_status = "Found" if exp.get("experience_section_found") else "Not found!! fallback scan used"
         st.caption(f"CV experience section: {section_status}")
 
         if exp.get("requirement_text"):
@@ -206,7 +226,7 @@ def _render_results(result: dict):
             with st.expander(f"Detected employment blocks ({len(jobs)})"):
                 for i, job in enumerate(jobs, 1):
                     relevance = "Relevant" if job["relevant"] else "Not clearly relevant"
-                    st.markdown(f"**{i}. {job['period']} — {job['duration_years']:g} yrs — {relevance}**")
+                    st.markdown(f"**{i}. {job['period']} - {job['duration_years']:g} yrs - {relevance}**")
                     if job.get("matched_skills"):
                         st.caption("Matched skills: " + ", ".join(job["matched_skills"]))
                     if job.get("matched_role_terms"):
@@ -222,40 +242,53 @@ def _render_results(result: dict):
         )
 
     with tabs[4]:
-        loc = result["location"]
-        st.markdown("#### Location alignment")
+        st.markdown("#### Location")
+
+        location = result.get("location", {})
+
         c1, c2, c3 = st.columns(3)
-        c1.metric("JD location", (loc.get("jd_location") or "Not detected").title())
-        c2.metric("CV location", (loc.get("cv_location") or "Not detected").title())
-        c3.metric("Alignment", loc.get("status", "Unknown"))
-        if loc.get("distance_km") is not None:
-            st.caption(f"Approximate area-centroid distance: {loc['distance_km']:.1f} km")
-        st.info(loc["note"])
 
-        st.divider()
-        priority = result["priority"]
-        st.markdown("#### Preferred / Additional Advantage")
+        c1.metric(
+            "Job Location",
+            location.get("jd_location") or "Not detected"
+        )
 
-        if priority["matched"]:
-            st.markdown("##### Evidenced in CV")
-            for item in priority["matched"]:
-                evidence = ", ".join(item.get("evidence", []))
-                st.success(item["text"] + (f"  \nEvidence: {evidence}" if evidence else ""))
+        c2.metric(
+            "CV Location",
+            location.get("cv_location") or "Not detected"
+        )
 
-        if priority["unmatched"]:
-            st.markdown("##### Not evidenced in CV")
-            for item in priority["unmatched"]:
-                st.warning(item["text"])
-
-        if not priority["matched"] and not priority["unmatched"]:
-            st.caption("No non-sensitive preferred/additional-advantage criteria detected.")
-
-        if priority["excluded_sensitive"]:
-            st.markdown("##### Excluded from automated matching")
-            for item in priority["excluded_sensitive"]:
-                st.info(f"{item['text']}  \n{item['reason']}")
-
+        c3.metric(
+            "Status",
+            location.get("status") or "Unknown"
+        )
+        
     with tabs[5]:
+        st.markdown("#### Additional Advantages")
+
+        advantages = result.get("advantages", {})
+
+        matched = advantages.get("matched", [])
+        missing = advantages.get("missing", [])
+
+        if matched:
+            st.markdown("**Matched**")
+
+            for item in matched:
+                st.write(f"✅ {item}")
+
+        if missing:
+            st.markdown("**Not found in CV**")
+
+            for item in missing:
+                st.write(f"⚪ {item}")
+
+        if not matched and not missing:
+            st.caption(
+                "No additional advantage requirements detected."
+            )
+        
+    with tabs[6]:
         st.metric("Keyword coverage", f"{result['keywords']['coverage_score']:.0f}%")
         c1, c2 = st.columns(2, gap="large")
         with c1:
@@ -269,16 +302,14 @@ def _render_results(result: dict):
             for item in result["keywords"]["missing"]:
                 st.write(f"❌ **{item['keyword']}** — JD {item['jd_count']}×")
 
-    with tabs[6]:
+    with tabs[7]:
         for i, suggestion in enumerate(result["suggestions"], 1):
             st.markdown(f"**{i}.** {suggestion}")
 
-    with tabs[7]:
+    with tabs[8]:
         for i, item in enumerate(result["interview_questions"], 1):
             st.markdown(f"**{i}. {item['type']}**")
             st.write(item["question"])
-            if item.get("evidence"):
-                st.caption("CV evidence: " + item["evidence"])
             if i != len(result["interview_questions"]):
                 st.divider()
 
@@ -287,8 +318,8 @@ def render_analyze_page():
     st.markdown(
         """
         <div class="hero">
-            <div class="hero-badge">AI RESUME CHECKER</div>
-            <h1>Resume Match Analyzer</h1>
+            <div class="hero-badge">Analyzer</div>
+            <h1>AI Resume Analyzer</h1>
             <p>
                 Compare CV requirements against a job description: skills, experience, education,
                 location alignment, preferred criteria, semantic similarity and explainable score.
