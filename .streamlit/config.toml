@@ -1,0 +1,12 @@
+[theme]
+primaryColor = "#CF3F44"
+backgroundColor = "#FFFDFD"
+secondaryBackgroundColor = "#FFF4F4"
+textColor = "#2A1B1C"
+font = "sans serif"
+
+[server]
+maxUploadSize = 8
+
+[browser]
+gatherUsageStats = false

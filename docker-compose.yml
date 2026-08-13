@@ -1,0 +1,8 @@
+services:
+  app:
+    build: .
+    environment:
+      MAX_FILE_MB: 8
+      SEMANTIC_MODEL: sentence-transformers/all-MiniLM-L6-v2
+    ports:
+      - "8501:8501"
