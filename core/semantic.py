@@ -75,3 +75,58 @@ def semantic_similarity(resume_text: str, jd_text: str) -> dict:
             "fallback": True,
             "warning": str(exc)[:300],
         }
+
+
+def semantic_requirement_matches(requirements: list[str], job_blocks: list[str]) -> list[dict]:
+    """
+    Batch-match each JD requirement against the best CV employment block.
+    Returns 0-100 similarity scores and the best block index.
+    """
+    if not requirements:
+        return []
+    if not job_blocks:
+        return [
+            {"requirement": req, "score": 0.0, "best_block_index": None, "engine": "No employment block"}
+            for req in requirements
+        ]
+
+    try:
+        model = _load_model()
+        req_embeddings = model.encode(requirements, normalize_embeddings=True, show_progress_bar=False)
+        job_embeddings = model.encode(job_blocks, normalize_embeddings=True, show_progress_bar=False)
+        matrix = np.matmul(req_embeddings, job_embeddings.T)
+        out = []
+        for i, req in enumerate(requirements):
+            idx = int(np.argmax(matrix[i]))
+            score = float(matrix[i][idx])
+            out.append({
+                "requirement": req,
+                "score": round(max(0.0, min(1.0, score)) * 100, 1),
+                "best_block_index": idx,
+                "engine": f"Sentence Transformers ({SEMANTIC_MODEL})",
+            })
+        return out
+    except Exception:
+        # TF-IDF fallback. Fit all requirements and employment blocks in one vocabulary.
+        corpus = requirements + job_blocks
+        try:
+            vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=7000)
+            matrix = vectorizer.fit_transform(corpus)
+            req_matrix = matrix[:len(requirements)]
+            job_matrix = matrix[len(requirements):]
+            sims = cosine_similarity(req_matrix, job_matrix)
+            out = []
+            for i, req in enumerate(requirements):
+                idx = int(np.argmax(sims[i]))
+                out.append({
+                    "requirement": req,
+                    "score": round(float(sims[i][idx]) * 100, 1),
+                    "best_block_index": idx,
+                    "engine": "TF-IDF cosine fallback",
+                })
+            return out
+        except Exception:
+            return [
+                {"requirement": req, "score": 0.0, "best_block_index": None, "engine": "Unavailable"}
+                for req in requirements
+            ]

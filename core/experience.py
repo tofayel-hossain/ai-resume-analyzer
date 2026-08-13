@@ -480,10 +480,12 @@ def _date_matches_with_blocks(section_text: str) -> list[dict]:
         previous_idx = matches[i - 1]["line_index"] if i > 0 else -1
         next_idx = matches[i + 1]["line_index"] if i + 1 < len(matches) else len(lines)
 
-        start_line = max(previous_idx + 1, idx - 4, 0)
-        end_line = min(len(lines), idx + 14)
+        start_line = max(previous_idx + 1, idx - 5, 0)
+        # Keep a substantially larger portion of each employment entry so CVs with
+        # many responsibility bullets are not classified from only the first few lines.
+        end_line = min(len(lines), idx + 40)
         if next_idx < len(lines):
-            end_line = min(end_line, max(idx + 1, next_idx - 2))
+            end_line = min(end_line, max(idx + 1, next_idx - 1))
 
         block_lines = [line.strip() for line in lines[start_line:end_line] if line.strip()]
         item["block"] = "\n".join(block_lines)
@@ -636,3 +638,303 @@ def experience_match(resume_text: str, jd_text: str, jd_skills: list[str]) -> di
         "evidence": evidence[:5],
     }
 
+
+# -----------------------------------------------------------------------------
+# Requirement-by-requirement experience matcher (v2)
+# -----------------------------------------------------------------------------
+
+def _split_requirement_sentence(line: str) -> list[str]:
+    line = re.sub(r"^[\s•*\-–—]+", "", line).strip()
+    if not line:
+        return []
+    # Keep technical phrases together but split obvious semicolon-separated items.
+    parts = [p.strip(" .") for p in re.split(r"\s*;\s*", line) if p.strip(" .")]
+    return parts
+
+
+def extract_jd_experience_requirements(jd_text: str) -> list[str]:
+    """
+    Extract concrete experience/responsibility/skill requirements from the JD.
+    This deliberately ignores benefits, location and sensitive personal criteria.
+    """
+    desired_headings = {
+        "responsibilities and context",
+        "responsibilities",
+        "skills and expertise",
+        "other relevant skills",
+    }
+    stop_headings = {
+        "compensation and other benefits",
+        "workplace",
+        "employment status",
+        "job location",
+        "education",
+        "experience",
+    }
+    known_headings = {_normalize_heading_text(x) for x in JD_SECTION_HEADINGS}
+
+    lines = jd_text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    capture = False
+    rows: list[str] = []
+
+    for raw in lines:
+        line = raw.strip()
+        heading = _normalize_heading_text(line)
+
+        if heading in desired_headings:
+            capture = True
+            continue
+        if heading in stop_headings:
+            capture = False
+            continue
+        if heading in known_headings and heading not in desired_headings:
+            capture = False
+            continue
+        if not capture or not line:
+            continue
+
+        low = normalize_token(line)
+        # Do not use sensitive personal criteria as experience evidence.
+        if re.search(r"\bage\b|\bnon[- ]?muslim\b|\breligion\b|\bgender\b|\bmarital\b", low, re.I):
+            continue
+        if re.search(r"\bprovident fund\b|\blunch facilities\b|\bfestival bonus\b|\bsalary review\b", low, re.I):
+            continue
+        if re.search(r"\bany other(?:'s|s)? duties\b", low, re.I):
+            continue
+
+        for part in _split_requirement_sentence(line):
+            # Keep short skill rows like NOC, HVAC, Data centre, but drop empty/generic labels.
+            norm = normalize_token(part)
+            if norm in {"responsibilities", "skills", "skills expertise", "other relevant skills"}:
+                continue
+            if len(norm) >= 3:
+                rows.append(part)
+
+    # Fallback for less structured JDs: experience-bearing sentences from the whole JD.
+    if not rows:
+        for raw in jd_text.splitlines():
+            line = raw.strip()
+            low = normalize_token(line)
+            if not line:
+                continue
+            if any(cue in low for cue in ("experience on", "experience of", "working experience", "installation experience", "operation and maintenance")):
+                rows.extend(_split_requirement_sentence(line))
+
+    # Stable de-duplication, including exact duplicate NOC/Data NOC style lines.
+    deduped = []
+    seen = set()
+    for row in rows:
+        key = normalize_token(row)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(row)
+    return deduped[:40]
+
+
+def _content_tokens(text: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z][a-z0-9+#./-]{2,}", normalize_token(text)))
+    return {t for t in tokens if t not in RELEVANCE_STOPWORDS and len(t) >= 3}
+
+
+def _token_overlap_score(a: str, b: str) -> float:
+    ta = _content_tokens(a)
+    tb = _content_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    # Requirement coverage: how much of the JD requirement vocabulary appears in the CV job block.
+    return len(ta & tb) / len(ta)
+
+
+def _requirement_rows(requirements: list[str], job_blocks: list[str]) -> list[dict]:
+    from core.semantic import semantic_requirement_matches
+    from core.skills import extract_skills
+
+    semantic_rows = semantic_requirement_matches(requirements, job_blocks)
+    rows = []
+
+    for sem in semantic_rows:
+        req = sem["requirement"]
+        idx = sem.get("best_block_index")
+        block = job_blocks[idx] if idx is not None and 0 <= idx < len(job_blocks) else ""
+
+        req_skills = set(extract_skills(req))
+        block_skills = set(extract_skills(block))
+        matched_skills = sorted(req_skills & block_skills)
+        skill_coverage = (len(matched_skills) / len(req_skills)) if req_skills else 0.0
+        token_overlap = _token_overlap_score(req, block)
+        semantic_score = float(sem.get("score", 0.0))
+
+        # Strong evidence can come from an explicit skill/technology match or a clear semantic paraphrase.
+        # Short skill-only requirements need direct skill evidence rather than semantic guesswork.
+        short_skill_row = len(_content_tokens(req)) <= 3 and bool(req_skills)
+        if short_skill_row:
+            matched = bool(matched_skills)
+        else:
+            matched = bool(
+                matched_skills
+                or skill_coverage >= 0.5
+                or token_overlap >= 0.34
+                or semantic_score >= 43.0
+            )
+
+        confidence = max(
+            semantic_score,
+            skill_coverage * 100,
+            token_overlap * 100,
+        )
+
+        rows.append({
+            "requirement": req,
+            "matched": matched,
+            "confidence": round(confidence, 1),
+            "semantic_score": round(semantic_score, 1),
+            "token_overlap": round(token_overlap * 100, 1),
+            "required_skills": sorted(req_skills),
+            "matched_skills": matched_skills,
+            "best_block_index": idx,
+            "evidence": block[:650] if matched and block else None,
+            "engine": sem.get("engine"),
+        })
+
+    return rows
+
+
+def experience_match(resume_text: str, jd_text: str, jd_skills: list[str]) -> dict:
+    """
+    Requirement-driven experience matching.
+
+    1. Parse JD years/range.
+    2. Isolate CV work-experience section and employment blocks.
+    3. Compare every JD responsibility/experience requirement against CV employment blocks.
+    4. Count years only from job blocks that have concrete JD evidence.
+    5. Compare explicit business-area requirements separately.
+    """
+    requirement_details = extract_requirement_details(jd_text)
+    requirement = requirement_details["years"]
+    max_requirement = requirement_details.get("max_years")
+
+    experience_text, section_found = extract_experience_section(resume_text)
+    date_items = _date_matches_with_blocks(experience_text)
+
+    parsed_jobs = []
+    intervals_all = []
+    for item in date_items:
+        match = item["match"]
+        block = item["block"]
+        try:
+            start = _parse_date(match.group("start"), is_end=False)
+            end = _parse_date(match.group("end"), is_end=True)
+            if end < start:
+                continue
+        except Exception:
+            continue
+
+        if not (section_found or _looks_like_work_block(block)):
+            continue
+
+        interval = (start, end)
+        intervals_all.append(interval)
+        parsed_jobs.append({
+            "period": match.group(0).strip(),
+            "duration_years": round(_months_between(start, end) / 12, 1),
+            "interval": interval,
+            "block": block[:900],
+        })
+
+    job_blocks = [j["block"] for j in parsed_jobs]
+    jd_requirements = extract_jd_experience_requirements(jd_text)
+    if not jd_requirements and jd_skills:
+        # Unstructured JDs may not have Responsibilities/Skills headings. In that case,
+        # use the already-extracted JD skills as concrete experience evidence requirements.
+        jd_requirements = list(dict.fromkeys(jd_skills))
+    req_rows = _requirement_rows(jd_requirements, job_blocks) if job_blocks else []
+
+    # Attribute matched requirements to their best employment block.
+    matches_by_job: dict[int, list[dict]] = {i: [] for i in range(len(parsed_jobs))}
+    for row in req_rows:
+        idx = row.get("best_block_index")
+        if row["matched"] and idx is not None and idx in matches_by_job:
+            matches_by_job[idx].append(row)
+
+    relevant_intervals = []
+    detected_jobs = []
+    evidence = []
+
+    for idx, job in enumerate(parsed_jobs):
+        job_matches = matches_by_job.get(idx, [])
+        strong_matches = [r for r in job_matches if r["confidence"] >= 50 or r["matched_skills"]]
+        # A job is relevant when at least one strong JD responsibility/skill matches,
+        # or at least two moderate requirements match the same employment block.
+        relevant = bool(strong_matches or len(job_matches) >= 2)
+        if relevant:
+            relevant_intervals.append(job["interval"])
+            evidence.append(job["block"][:450])
+
+        detected_jobs.append({
+            "period": job["period"],
+            "duration_years": job["duration_years"],
+            "relevant": relevant,
+            "matched_requirement_count": len(job_matches),
+            "matched_requirements": [r["requirement"] for r in job_matches[:8]],
+            "best_confidence": max([r["confidence"] for r in job_matches], default=0.0),
+            "block": job["block"],
+        })
+
+    total_months = _merge_intervals(intervals_all)
+    relevant_months = _merge_intervals(relevant_intervals)
+    total_years = round(total_months / 12, 1)
+    relevant_years = round(relevant_months / 12, 1)
+
+    if requirement is not None:
+        years_score = min(100.0, (relevant_years / requirement) * 100) if relevant_years > 0 else 0.0
+        shortfall = round(max(0.0, requirement - relevant_years), 1)
+        if relevant_years >= requirement:
+            years_status = "Meets minimum years requirement"
+        elif relevant_years > 0:
+            years_status = f"Does not fully meet minimum; short by about {shortfall:g} years"
+        else:
+            years_status = "No clearly relevant dated experience detected"
+    else:
+        shortfall = None
+        years_status = "JD years requirement not explicit"
+        years_score = 90.0 if relevant_years >= 3 else 80.0 if relevant_years >= 1 else 55.0 if total_years > 0 else 35.0
+
+    matched_requirements = [r for r in req_rows if r["matched"]]
+    missing_requirements = [r for r in req_rows if not r["matched"]]
+    responsibility_score = round(
+        (len(matched_requirements) / len(req_rows)) * 100, 1
+    ) if req_rows else None
+
+    domain_match = match_experience_domain_requirements(resume_text, jd_text)
+
+    # Experience fitness should represent three different questions:
+    # years, actual responsibility evidence, and explicit industry/business-area evidence.
+    if responsibility_score is not None and domain_match["score"] is not None:
+        score = years_score * 0.55 + responsibility_score * 0.30 + domain_match["score"] * 0.15
+    elif responsibility_score is not None:
+        score = years_score * 0.60 + responsibility_score * 0.40
+    elif domain_match["score"] is not None:
+        score = years_score * 0.75 + domain_match["score"] * 0.25
+    else:
+        score = years_score
+
+    return {
+        "score": round(score, 1),
+        "years_score": round(years_score, 1),
+        "required_years": requirement,
+        "max_required_years": max_requirement,
+        "requirement_text": requirement_details["text"],
+        "requirement_source": requirement_details.get("source"),
+        "total_years_detected": total_years,
+        "relevant_years_detected": relevant_years,
+        "years_status": years_status,
+        "years_shortfall": shortfall,
+        "experience_section_found": section_found,
+        "detected_jobs": detected_jobs,
+        "experience_domain_requirements": domain_match,
+        "jd_experience_requirements": jd_requirements,
+        "responsibility_match_score": responsibility_score,
+        "matched_experience_requirements": matched_requirements,
+        "missing_experience_requirements": missing_requirements,
+        "evidence": evidence[:5],
+    }
