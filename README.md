@@ -68,6 +68,12 @@ ai-resume-analyzer/
 * **NumPy** — Numerical operations
 * **Regex** — Requirement, date, and experience extraction
 
+## Live Link
+
+```text
+https://ai-resume-analyzer-th.streamlit.app/
+```
+
 ## How to Run
 
 ### 1. Clone the Repository
