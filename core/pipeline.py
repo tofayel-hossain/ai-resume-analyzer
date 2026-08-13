@@ -331,15 +331,20 @@ def analyze(
     file_bytes: bytes,
     filename: str,
     jd_text: str,
-) -> dict:
+    progress_callback=None,
+):
     """
     Run the complete Resume ↔ Job Description analysis.
     """
 
+    def update(percent, message):
+        if progress_callback:
+            progress_callback(percent, message)
+
     # =========================================================
     # 1. RESUME + JD TEXT
     # =========================================================
-
+    update(15, "Extracting resume...")
     resume_raw = extract_resume_text(
         file_bytes,
         filename,
@@ -356,7 +361,7 @@ def analyze(
     # =========================================================
     # 2. STRUCTURED JD REQUIREMENTS
     # =========================================================
-
+    update(35, "Processing information...")
     requirements = build_requirement_comparison(
         resume_text,
         jd_text,
@@ -365,7 +370,7 @@ def analyze(
     # =========================================================
     # 3. SKILL MATCH
     # =========================================================
-
+    update(55, "Matching CV with Job Description...")
     # Only use requirement-bearing JD sections.
     # Benefits / location / sensitive criteria should not
     # reduce the actual required-skill score.
@@ -399,7 +404,7 @@ def analyze(
     # =========================================================
     # 6. EXPERIENCE MATCH
     # =========================================================
-
+    
     experience = experience_match(
         resume_text,
         jd_text,
@@ -482,7 +487,7 @@ def analyze(
     # =========================================================
     # 11. SAFE COMPONENT SCORES
     # =========================================================
-
+    update(75, "Calculating compatibility score...")
     semantic_score = _safe_score(
         semantic.get(
             "score",
@@ -548,7 +553,7 @@ def analyze(
     # =========================================================
     # 13. RESULT OBJECT
     # =========================================================
-
+    update(90, "Preparing output...")
     result = {
         "job_title": extract_job_title(
             jd_text
@@ -619,5 +624,5 @@ def analyze(
         result,
         resume_text,
     )
-
+    update(100, "✓ Analysis ready")
     return result

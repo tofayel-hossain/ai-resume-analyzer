@@ -364,12 +364,30 @@ def render_analyze_page():
             return
 
         try:
-            with st.spinner("Comparing CV requirements with the job description..."):
-                result = analyze(file_bytes, uploaded.name, jd_text)
+            status_text = st.empty()
+            progress_bar = st.progress(0)
+
+            def show_progress(percent, message):
+                progress_bar.progress(percent)
+                status_text.markdown(f"**{message}**")
+
+            result = analyze(
+                file_bytes,
+                uploaded.name,
+                jd_text,
+                progress_callback=show_progress,
+            )
+
             st.session_state["latest_result"] = result
+
+            progress_bar.empty()
+            status_text.empty()
+
             _render_results(result)
+
         except ResumeParseError as exc:
             st.error(str(exc))
+
         except Exception as exc:
             st.exception(exc)
 
