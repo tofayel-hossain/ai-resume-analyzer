@@ -1,5 +1,4 @@
 import re
-
 from core.text_utils import detect_sections
 
 
@@ -71,14 +70,20 @@ def overall_score(
     skill_score: float,
     semantic_score: float,
     experience_score: float,
+    education_score: float,
     keyword_score: float,
     quality_score: float,
 ) -> float:
+    """
+    Core job-match score.
+    Location and preferred/advantage criteria are intentionally not included.
+    """
     score = (
-        skill_score * 0.30
-        + semantic_score * 0.25
+        skill_score * 0.25
+        + semantic_score * 0.20
         + experience_score * 0.20
-        + keyword_score * 0.15
+        + education_score * 0.15
+        + keyword_score * 0.10
         + quality_score * 0.10
     )
     return round(max(0.0, min(100.0, score)), 1)

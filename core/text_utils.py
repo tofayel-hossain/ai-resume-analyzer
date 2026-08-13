@@ -5,7 +5,7 @@ from typing import Iterable
 SECTION_ALIASES = {
     "summary": ["summary", "professional summary", "profile", "objective"],
     "skills": ["skills", "technical skills", "core competencies", "technologies"],
-    "experience": ["experience", "work experience", "employment", "professional experience"],
+    "experience": ["experience", "work experience", "professional experience", "employment", "employment history", "work history", "career history", "professional background", "relevant experience"],
     "education": ["education", "academic background", "qualifications"],
     "projects": ["projects", "selected projects", "academic projects", "personal projects"],
     "certifications": ["certifications", "certificates", "licenses"],

@@ -134,12 +134,39 @@ SKILL_ALIASES = {
     "Project Management": ["project management", "project manager"],
     "Communication": ["communication", "communication skills"],
     "Problem Solving": ["problem solving", "problem-solving"],
+
+    # Electrical / Data Center / Telecom
+    "Data Center": ["data center", "datacenter", "data centre"],
+    "NOC": ["noc", "network operations center", "network operation center"],
+    "Operation & Maintenance": ["operation and maintenance", "operations and maintenance", "operation & maintenance", "o&m"],
+    "Electrical Systems": ["electrical system", "electrical systems"],
+    "Precision Air Conditioning (PAC)": ["precision ac", "precision air conditioning", "pac"],
+    "UPS": ["ups", "uninterruptible power supply", "uninterruptible power supplies"],
+    "Diesel Generator": ["diesel generator", "dg", "generator"],
+    "Fire Protection & Detection": ["fire protection", "fire detection", "fire protection and detection", "fire protection & detection"],
+    "PFI": ["pfi", "power factor improvement"],
+    "LT Panel": ["lt panel", "low tension panel"],
+    "HT Panel": ["ht panel", "high tension panel"],
+    "HVAC": ["hvac", "heating ventilation and air conditioning"],
+    "BMS": ["bms", "building management system", "building power management"],
+    "Server": ["server", "servers"],
+    "Router": ["router", "routers"],
+    "Network Switch": ["network switch", "switches", "switch"],
+    "Commissioning": ["commissioning"],
+    "Electrical Testing": ["electrical testing", "testing and maintenance"],
+    "Hardware Inventory": ["hardware inventory"],
+    "Microsoft PowerPoint": ["microsoft powerpoint", "powerpoint", "power point"],
+    "Microsoft Word": ["microsoft word", "ms word", "word"],
+    "Microsoft Excel": ["microsoft excel", "ms excel", "excel", "xls"],
+    "CDCP": ["cdcp", "certified data centre professional", "certified data center professional"],
+    "CDFOM": ["cdfom", "certified data centre facilities operations manager", "certified data center facilities operations manager"],
+    "Telecommunication": ["telecommunication", "telecommunications", "telecom"],
 }
 
 
 BOUNDARY_ALIASES = {
     "c", "r", "go", "sql", "js", "ts", "ml", "dl", "aws", "gcp",
-    "jwt", "etl", "rag", "iot", "git", "php", "cv", "nlp", "llm", "llms"
+    "jwt", "etl", "rag", "iot", "git", "php", "cv", "nlp", "llm", "llms", "noc", "ups", "pfi", "bms", "pac", "dg", "cdcp", "cdfom"
 }
 
 
