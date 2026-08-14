@@ -71,6 +71,7 @@ def _render_results(result: dict):
             "Experience",
             "Location",
             "Additional Advantages",
+            "Age",
             "Keywords",
             "Improvements",
             "Interview Preparation",
@@ -287,8 +288,73 @@ def _render_results(result: dict):
             st.caption(
                 "No additional advantage requirements detected."
             )
-        
+    
     with tabs[6]:
+        st.markdown("#### Age Information")
+
+        age_info = result.get(
+            "age_information",
+            {},
+        )
+
+        jd_requirement = (
+            age_info.get("jd_requirement")
+            or "Not explicitly detected"
+        )
+
+        cv_dob = (
+            age_info.get("cv_dob")
+            or "Not detected"
+        )
+
+        calculated_age = age_info.get(
+            "calculated_age"
+        )
+
+        if calculated_age is None:
+            age_display = "Not available"
+        else:
+            age_display = f"{calculated_age} years"
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "JD Age Requirement",
+            jd_requirement,
+        )
+
+        c2.metric(
+            "CV Date of Birth",
+            cv_dob,
+        )
+
+        c3.metric(
+            "Calculated Age",
+            age_display,
+        )
+
+        if not age_info.get(
+            "jd_requirement_detected"
+        ):
+            st.caption(
+                "No explicit age requirement was detected "
+                "in the Job Description."
+            )
+
+        elif not age_info.get(
+            "cv_dob_detected"
+        ):
+            st.caption(
+                "A Job Description age requirement was detected, "
+                "but no explicit Date of Birth was found in the CV."
+            )
+
+        else:
+            st.info(
+                "Age information is calculated from your CV."
+            )
+    
+    with tabs[7]:
         st.metric("Keyword coverage", f"{result['keywords']['coverage_score']:.0f}%")
         c1, c2 = st.columns(2, gap="large")
         with c1:
@@ -302,11 +368,11 @@ def _render_results(result: dict):
             for item in result["keywords"]["missing"]:
                 st.write(f"❌ **{item['keyword']}** — JD {item['jd_count']}×")
 
-    with tabs[7]:
+    with tabs[8]:
         for i, suggestion in enumerate(result["suggestions"], 1):
             st.markdown(f"**{i}.** {suggestion}")
 
-    with tabs[8]:
+    with tabs[9]:
         for i, item in enumerate(result["interview_questions"], 1):
             st.markdown(f"**{i}. {item['type']}**")
             st.write(item["question"])

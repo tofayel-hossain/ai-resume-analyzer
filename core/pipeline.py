@@ -650,6 +650,11 @@ def analyze(
         "priority",
         {},
     )
+    
+    age_information = requirements.get(
+        "age_information",
+        {},
+    )
 
     # =========================================================
     # 8. RESUME QUALITY
@@ -805,7 +810,7 @@ def analyze(
         # Also expose a clearer alias if you later
         # want to use result["advantages"].
         "advantages": priority,
-
+        "age_information": age_information,
         "quality": quality,
 
         "scores": {

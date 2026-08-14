@@ -26,7 +26,209 @@ JD_HEADINGS = {
     "qualifications",
 }
 
+def extract_age_requirement(jd_text: str) -> dict:
+    """
+    Detect age requirements from the Job Description.
+    This information is for human review only.
+    """
 
+    text = jd_text or ""
+
+    # Example:
+    # Age: 25 to 30 years
+    # Age: 25-30 years
+    # Age between 25 and 30 years
+    range_patterns = [
+        r"\bage\s*[:\-]?\s*(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*(?:years?|yrs?)?",
+        r"\bage\s*(?:between)\s*(\d{1,2})\s*(?:and|to|-|–)\s*(\d{1,2})\s*(?:years?|yrs?)?",
+    ]
+
+    for pattern in range_patterns:
+        match = re.search(
+            pattern,
+            text,
+            flags=re.I,
+        )
+
+        if match:
+            return {
+                "detected": True,
+                "requirement_text": match.group(0).strip(),
+                "minimum_age": int(match.group(1)),
+                "maximum_age": int(match.group(2)),
+            }
+
+    # Minimum age
+    minimum_patterns = [
+        r"\bage\s*[:\-]?\s*(?:at\s+least|min(?:imum)?\.?|not\s+less\s+than)\s*(\d{1,2})\s*(?:years?|yrs?)?",
+        r"\bminimum\s+age\s*[:\-]?\s*(\d{1,2})",
+        r"\bat\s+least\s+(\d{1,2})\s+years?\s+(?:old|of\s+age)",
+    ]
+
+    for pattern in minimum_patterns:
+        match = re.search(
+            pattern,
+            text,
+            flags=re.I,
+        )
+
+        if match:
+            return {
+                "detected": True,
+                "requirement_text": match.group(0).strip(),
+                "minimum_age": int(match.group(1)),
+                "maximum_age": None,
+            }
+
+    # Maximum age
+    maximum_patterns = [
+        r"\bage\s*[:\-]?\s*(?:maximum|max\.?|not\s+more\s+than|up\s+to)\s*(\d{1,2})\s*(?:years?|yrs?)?",
+        r"\bmaximum\s+age\s*[:\-]?\s*(\d{1,2})",
+    ]
+
+    for pattern in maximum_patterns:
+        match = re.search(
+            pattern,
+            text,
+            flags=re.I,
+        )
+
+        if match:
+            return {
+                "detected": True,
+                "requirement_text": match.group(0).strip(),
+                "minimum_age": None,
+                "maximum_age": int(match.group(1)),
+            }
+
+    return {
+        "detected": False,
+        "requirement_text": "",
+        "minimum_age": None,
+        "maximum_age": None,
+    }
+        
+def extract_cv_date_of_birth(resume_text: str):
+    """
+    Extract DOB only when an explicit DOB/Birth Date label exists.
+
+    This avoids confusing education/employment dates
+    with the candidate's date of birth.
+    """
+
+    if not resume_text:
+        return None
+
+    match = re.search(
+        r"(?im)^\s*"
+        r"(?:date\s+of\s+birth|dob|birth\s+date|birthday)"
+        r"\s*[:\-]\s*"
+        r"(.+?)\s*$",
+        resume_text,
+    )
+
+    if not match:
+        return None
+
+    raw_date = match.group(1).strip()
+
+    # Remove accidental text after common separators
+    raw_date = raw_date.split("|")[0].strip()
+
+    formats = [
+        "%d %B %Y",      # 30 March 2006
+        "%d %b %Y",      # 30 Mar 2006
+        "%B %d, %Y",     # March 30, 2006
+        "%b %d, %Y",     # Mar 30, 2006
+        "%d/%m/%Y",      # 30/03/2006
+        "%d-%m-%Y",      # 30-03-2006
+        "%d.%m.%Y",      # 30.03.2006
+        "%Y-%m-%d",      # 2006-03-30
+        "%Y/%m/%d",      # 2006/03/30
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(
+                raw_date,
+                fmt,
+            ).date()
+
+        except ValueError:
+            continue
+
+    return None
+    
+def calculate_age(dob) -> int | None:
+    """
+    Calculate current age from date of birth.
+    """
+
+    if dob is None:
+        return None
+
+    today = date.today()
+
+    age = (
+        today.year
+        - dob.year
+        - (
+            (today.month, today.day)
+            < (dob.month, dob.day)
+        )
+    )
+
+    return max(age, 0)
+    
+def build_age_information(
+    resume_text: str,
+    jd_text: str,
+) -> dict:
+
+    jd_age = extract_age_requirement(
+        jd_text
+    )
+
+    dob = extract_cv_date_of_birth(
+        resume_text
+    )
+
+    calculated_age = calculate_age(
+        dob
+    )
+
+    return {
+        "jd_requirement_detected": jd_age[
+            "detected"
+        ],
+
+        "jd_requirement": jd_age[
+            "requirement_text"
+        ],
+
+        "minimum_age": jd_age[
+            "minimum_age"
+        ],
+
+        "maximum_age": jd_age[
+            "maximum_age"
+        ],
+
+        "cv_dob_detected": dob is not None,
+
+        "cv_dob": (
+            dob.strftime("%d %B %Y")
+            if dob
+            else None
+        ),
+
+        "calculated_age": calculated_age,
+
+        # Important:
+        "used_in_score": False,
+        "automated_decision": False,
+    }
+    
 def _norm_heading(line: str) -> str:
     line = line.strip().lower().rstrip(":")
     line = line.replace("&", "and")
@@ -601,10 +803,23 @@ def priority_requirements_match(resume_text: str, jd_text: str) -> dict:
     }
 
 
-def build_requirement_comparison(resume_text: str, jd_text: str) -> dict:
+def build_requirement_comparison(
+    resume_text: str,
+    jd_text: str,
+) -> dict:
+
+    age_information = build_age_information(
+        resume_text,
+        jd_text,
+    )
+
     return {
         "skill_requirements": build_jd_skill_text(jd_text),
         "education": education_match(resume_text, jd_text),
         "location": location_match(resume_text, jd_text),
-        "priority": priority_requirements_match(resume_text, jd_text),
+        "priority": priority_requirements_match(
+            resume_text,
+            jd_text,
+        ),
+        "age_information": age_information,
     }
